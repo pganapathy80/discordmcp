@@ -5,7 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
+import { Client, GatewayIntentBits, TextChannel, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { z } from 'zod';
 import { startChatOps } from './chatops.js';
 
@@ -105,6 +105,22 @@ const ReadMessagesSchema = z.object({
   limit: z.number().min(1).max(100).default(50),
 });
 
+const CreateChannelSchema = z.object({
+  server: z.string().optional().describe('Server name or ID (optional if bot is only in one server)'),
+  name: z.string().describe('Channel name (e.g., "updates")'),
+  topic: z.string().optional().describe('Channel topic/description'),
+});
+
+const CreateWebhookSchema = z.object({
+  server: z.string().optional().describe('Server name or ID (optional if bot is only in one server)'),
+  channel: z.string().describe('Channel name or ID to create webhook for'),
+  name: z.string().default('PrepMe Bot').describe('Webhook display name'),
+});
+
+const ListChannelsSchema = z.object({
+  server: z.string().optional().describe('Server name or ID (optional if bot is only in one server)'),
+});
+
 // Create server instance
 const server = new Server(
   {
@@ -167,6 +183,63 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["channel"],
         },
       },
+      {
+        name: "create-channel",
+        description: "Create a new text channel in a Discord server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            server: {
+              type: "string",
+              description: 'Server name or ID (optional if bot is only in one server)',
+            },
+            name: {
+              type: "string",
+              description: 'Channel name (e.g., "updates")',
+            },
+            topic: {
+              type: "string",
+              description: "Channel topic/description",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "create-webhook",
+        description: "Create a webhook for a Discord channel. Returns the webhook URL.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            server: {
+              type: "string",
+              description: 'Server name or ID (optional if bot is only in one server)',
+            },
+            channel: {
+              type: "string",
+              description: 'Channel name or ID to create webhook for',
+            },
+            name: {
+              type: "string",
+              description: 'Webhook display name (default: "PrepMe Bot")',
+            },
+          },
+          required: ["channel"],
+        },
+      },
+      {
+        name: "list-channels",
+        description: "List all text channels in a Discord server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            server: {
+              type: "string",
+              description: 'Server name or ID (optional if bot is only in one server)',
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -207,6 +280,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{
             type: "text",
             text: JSON.stringify(formattedMessages, null, 2),
+          }],
+        };
+      }
+
+      case "create-channel": {
+        const { server: serverIdentifier, name: channelName, topic } = CreateChannelSchema.parse(args);
+        const guild = await findGuild(serverIdentifier);
+
+        const channel = await guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          topic: topic || undefined,
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Channel #${channel.name} created in ${guild.name}. Channel ID: ${channel.id}`,
+          }],
+        };
+      }
+
+      case "create-webhook": {
+        const { server: serverIdentifier, channel: channelIdentifier, name: webhookName } = CreateWebhookSchema.parse(args);
+        const channel = await findChannel(channelIdentifier, serverIdentifier);
+
+        const webhook = await channel.createWebhook({
+          name: webhookName,
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              message: `Webhook "${webhookName}" created for #${channel.name}`,
+              webhookUrl: webhook.url,
+              webhookId: webhook.id,
+              channel: channel.name,
+              server: channel.guild.name,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "list-channels": {
+        const { server: serverIdentifier } = ListChannelsSchema.parse(args);
+        const guild = await findGuild(serverIdentifier);
+
+        const channels = guild.channels.cache
+          .filter((c): c is TextChannel => c instanceof TextChannel)
+          .map(c => ({
+            name: `#${c.name}`,
+            id: c.id,
+            topic: c.topic || '',
+          }));
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(channels, null, 2),
           }],
         };
       }
