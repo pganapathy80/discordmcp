@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import { z } from 'zod';
+import { startChatOps } from './chatops.js';
 
 // Load environment variables
 dotenv.config();
@@ -241,6 +242,14 @@ async function main() {
   try {
     // Login to Discord
     await client.login(token);
+
+    // Start ChatOps listener (runs alongside MCP server)
+    if (process.env.DISCORD_AUTHORIZED_USER_ID) {
+      await startChatOps(client);
+      console.error("ChatOps listener enabled");
+    } else {
+      console.error("ChatOps disabled (set DISCORD_AUTHORIZED_USER_ID to enable)");
+    }
 
     // Start MCP server
     const transport = new StdioServerTransport();
