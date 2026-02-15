@@ -121,6 +121,23 @@ const ListChannelsSchema = z.object({
   server: z.string().optional().describe('Server name or ID (optional if bot is only in one server)'),
 });
 
+const SendEmbedFieldSchema = z.object({
+  name: z.string().describe('Field name/title'),
+  value: z.string().describe('Field value'),
+  inline: z.boolean().optional().default(false).describe('Display field inline'),
+});
+
+const SendEmbedSchema = z.object({
+  server: z.string().optional().describe('Server name or ID (optional if bot is only in one server)'),
+  channel: z.string().describe('Channel name (e.g., "deployments") or ID'),
+  title: z.string().describe('Embed title'),
+  description: z.string().optional().describe('Embed description (markdown supported)'),
+  color: z.number().optional().describe('Embed color as decimal (e.g., 3066993 for green, 15158332 for red, 3447003 for blue)'),
+  fields: z.array(SendEmbedFieldSchema).optional().describe('Embed fields'),
+  footer: z.string().optional().describe('Footer text'),
+  url: z.string().optional().describe('URL to link the title to'),
+});
+
 // Create server instance
 const server = new Server(
   {
@@ -240,6 +257,57 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
         },
       },
+      {
+        name: "send-embed",
+        description: "Send a rich embed message to a Discord channel. Use for structured results with title, colored sidebar, fields, and footer.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            server: {
+              type: "string",
+              description: 'Server name or ID (optional if bot is only in one server)',
+            },
+            channel: {
+              type: "string",
+              description: 'Channel name (e.g., "deployments") or ID',
+            },
+            title: {
+              type: "string",
+              description: "Embed title",
+            },
+            description: {
+              type: "string",
+              description: "Embed description (markdown supported)",
+            },
+            color: {
+              type: "number",
+              description: "Embed color as decimal (3066993=green, 15158332=red, 3447003=blue, 16776960=yellow)",
+            },
+            fields: {
+              type: "array",
+              description: "Embed fields",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Field name" },
+                  value: { type: "string", description: "Field value" },
+                  inline: { type: "boolean", description: "Display inline (default: false)" },
+                },
+                required: ["name", "value"],
+              },
+            },
+            footer: {
+              type: "string",
+              description: "Footer text",
+            },
+            url: {
+              type: "string",
+              description: "URL to link the embed title to",
+            },
+          },
+          required: ["channel", "title"],
+        },
+      },
     ],
   };
 });
@@ -340,6 +408,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{
             type: "text",
             text: JSON.stringify(channels, null, 2),
+          }],
+        };
+      }
+
+      case "send-embed": {
+        const {
+          server: serverIdentifier,
+          channel: channelIdentifier,
+          title,
+          description,
+          color,
+          fields,
+          footer,
+          url,
+        } = SendEmbedSchema.parse(args);
+        const channel = await findChannel(channelIdentifier, serverIdentifier);
+
+        const embed: Record<string, unknown> = { title };
+        if (description) embed.description = description;
+        if (color !== undefined) embed.color = color;
+        if (url) embed.url = url;
+        if (fields && fields.length > 0) {
+          embed.fields = fields.map(f => ({
+            name: f.name,
+            value: f.value,
+            inline: f.inline ?? false,
+          }));
+        }
+        if (footer) embed.footer = { text: footer };
+
+        const sent = await channel.send({ embeds: [embed as any] });
+        return {
+          content: [{
+            type: "text",
+            text: `Embed sent to #${channel.name} in ${channel.guild.name}. Message ID: ${sent.id}`,
           }],
         };
       }
